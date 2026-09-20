@@ -5,6 +5,7 @@ uniform sampler2D gtexture;
 uniform sampler2D lightmap;
 uniform vec3 sunPosition;
 uniform vec3 upPosition;
+uniform mat4 gbufferModelViewInverse;
 uniform float frameTimeCounter;
 uniform float rainStrength;
 uniform float thunderStrength;
@@ -32,7 +33,18 @@ void main() {
         gl_FragData[2] = vec4(chillEmissionColor(chillEmissionType) * emissionMask, vanillaWater.a);
         return;
     }
-    if (chillIsWater < 0.5 && chillIceType < 0.5) {
+    if (chillIceType > 0.5) {
+        // Ice keeps Minecraft's own texture, tint, alpha and ordinary
+        // lightmap shading. The material marker only tells the fullscreen
+        // water pass to leave this pixel untouched.
+        vanillaWater.rgb *= light;
+        gl_FragData[0] = vanillaWater;
+        float materialBits = chillIceType > 1.5 ? 192.0 : 128.0;
+        gl_FragData[1] = vec4(0.5, 0.5, 1.0, materialBits / 255.0);
+        gl_FragData[2] = vec4(0.0, 0.0, 0.0, vanillaWater.a);
+        return;
+    }
+    if (chillIsWater < 0.5) {
         vanillaWater.rgb *= vec3(0.48) + light * 0.52;
         gl_FragData[0] = vanillaWater;
         // Transparent glass keeps the water marker, while its more opaque
@@ -41,20 +53,17 @@ void main() {
         gl_FragData[2] = vec4(0.0, 0.0, 0.0, vanillaWater.a);
         return;
     }
-    vec3 normal;
-    if (chillIsWater > 0.5) {
-        normal = chillWaterNormal(chillWorldPos.xz, frameTimeCounter, rainStrength);
-    } else {
-        normal = normalize(chillSurfaceNormal);
-        if (normal.y > 0.55) {
-            // Stationary, very fine irregularities break a perfectly flat
-            // mirror without turning the ice into moving water.
-            float microX = chillWaterNoise(chillWorldPos.xz * 0.82 + vec2(3.2, 7.1)) - 0.5;
-            float microZ = chillWaterNoise(chillWaterRotate(chillWorldPos.xz) * 0.82 + vec2(11.4, 1.8)) - 0.5;
-            float microStrength = chillIceType > 1.5 ? 0.030 : 0.014;
-            normal = normalize(normal + vec3(microX, 0.0, microZ) * microStrength);
-        }
-    }
+    vec3 geometryNormal = normalize(chillSurfaceNormal);
+    vec3 worldSunDir = normalize(mat3(gbufferModelViewInverse) * sunPosition);
+    vec3 worldUpDir = normalize(mat3(gbufferModelViewInverse) * upPosition);
+    float upwardExposure = abs(dot(geometryNormal, worldUpDir));
+    float horizontalWaterFace = smoothstep(0.42, 0.86, upwardExposure);
+    vec3 waveNormal = chillWaterNormal(chillWorldPos.xz, frameTimeCounter, rainStrength);
+    if (dot(geometryNormal, worldUpDir) < 0.0) waveNormal.y = -waveNormal.y;
+    // Only horizontal water receives the full height-field normal. A
+    // waterfall keeps its actual wall-facing normal instead of behaving
+    // like a bright horizontal lake rotated onto the mountainside.
+    vec3 normal = normalize(mix(geometryNormal, waveNormal, horizontalWaterFace));
     // The fullscreen pass supplies reflection and transmission. Keep a thin,
     // animated world-space surface layer for a readable lake even when SSR
     // cannot find an on-screen object to reflect.
@@ -66,33 +75,39 @@ void main() {
     float sampledLight = chillSaturate(max(max(light.r, light.g), light.b));
     float skyAccess = chillSaturate(chillLightmap.y);
     float blockAccess = chillSaturate(chillLightmap.x);
-    float day = chillDayFactor(normalize(sunPosition), normalize(upPosition));
-    float openSkyLight = skyAccess * mix(0.58, 1.0, day);
+    float day = chillDayFactor(worldSunDir, worldUpDir);
+    float directSun = max(dot(geometryNormal, worldSunDir), 0.0) * day;
+    float sideSkyLight = mix(0.16, 0.34, day);
+    float topSkyLight = mix(0.58, 0.92, day);
+    float openSkyLight = skyAccess * chillSaturate(mix(sideSkyLight, topSkyLight, upwardExposure) + directSun * 0.46);
     openSkyLight *= 1.0 - max(rainStrength * 0.18, thunderStrength * 0.36);
-    float surfaceLight = max(sampledLight, max(openSkyLight, blockAccess * 0.62));
+    float orientationAttenuation = mix(0.40, 1.0, upwardExposure);
+    float orientedSampledLight = sampledLight * orientationAttenuation;
+    float surfaceLight = max(orientedSampledLight, max(openSkyLight, blockAccess * 0.62));
     surfaceLight = pow(chillSaturate(surfaceLight), 1.10);
-    if (chillIsWater > 0.5) {
-        float ripple = chillWaterSurfacePattern(chillWorldPos.xz, frameTimeCounter, rainStrength, normal);
-        vec3 base = vec3(0.020, 0.075, 0.105) * mix(0.18, 1.0, surfaceLight);
-        base *= mix(0.74, 1.28, ripple);
-        base += vec3(0.010, 0.022, 0.026) * pow(ripple, 3.0) * surfaceLight;
-        gl_FragData[0] = vec4(base, vanillaWater.a * 0.38);
-    } else {
-        // Retain the Minecraft ice detail beneath a cool, polished surface.
-        // Reflections are added in composite after opaque scenery is complete.
-        vec3 iceBase = vanillaWater.rgb * (vec3(0.48) + light * 0.52);
-        float coolTint = chillIceType > 1.5 ? 0.34 : 0.20;
-        iceBase = mix(iceBase, iceBase * vec3(0.82, 0.96, 1.10), coolTint);
-        float iceAlpha = max(vanillaWater.a, chillIceType > 1.5 ? 0.90 : 0.58);
-        gl_FragData[0] = vec4(iceBase, iceAlpha);
+    vec2 waterPatternPosition = chillWorldPos.xz;
+    if (horizontalWaterFace < 0.5) {
+        waterPatternPosition = abs(geometryNormal.x) > abs(geometryNormal.z)
+            ? chillWorldPos.zy
+            : chillWorldPos.xy;
     }
+    float ripple = chillWaterSurfacePattern(waterPatternPosition, frameTimeCounter, rainStrength, normal);
+    // Vertical streams get restrained streak detail, not the intense
+    // crest highlight intended for a sunlit horizontal wave surface.
+    ripple = mix(0.36 + (ripple - 0.36) * 0.42, ripple, horizontalWaterFace);
+    vec3 base = vec3(0.020, 0.075, 0.105) * mix(0.18, 1.0, surfaceLight);
+    base *= mix(0.74, 1.28, ripple);
+    base += vec3(0.010, 0.022, 0.026) * pow(ripple, 3.0) * surfaceLight;
+    // A falling sheet is mostly transmitted scenery with a restrained
+    // blue tint. Keeping the lake alpha on a vertical face made mountain
+    // streams read as solid, self-lit white slabs.
+    float waterSurfaceAlpha = mix(0.18, 0.38, horizontalWaterFace);
+    gl_FragData[0] = vec4(base, vanillaWater.a * waterSurfaceAlpha);
 
-    // Three light bits, three sky-access bits and two material bits fit in A.
-    // Material 0 is water, 1 is clear/frosted ice and 2 is packed/blue ice.
+    // Water stores local illumination in the remaining payload.
     float lightBits = floor(chillSaturate(surfaceLight) * 7.0 + 0.5);
     float skyBits = floor(chillSaturate(skyAccess) * 7.0 + 0.5);
-    float materialBits = chillIceType > 1.5 ? 128.0 : (chillIceType > 0.5 ? 64.0 : 0.0);
-    float packedLighting = (lightBits + skyBits * 8.0 + materialBits) / 255.0;
+    float packedLighting = (lightBits + skyBits * 8.0) / 255.0;
     gl_FragData[1] = vec4(normal.xz * 0.5 + 0.5, 1.0, packedLighting);
     gl_FragData[2] = vec4(0.0, 0.0, 0.0, vanillaWater.a);
 }

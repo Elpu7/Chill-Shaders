@@ -30,7 +30,7 @@ varying vec4 chillColor;
 varying vec3 chillNormal;
 varying vec3 chillPlayerNormal;
 varying vec3 chillWorldPos;
-/* DRAWBUFFERS:024 */
+/* DRAWBUFFERS:0234 */
 
 void main() {
     // Minecraft supplies leather dye and text-display tint through gl_Color.
@@ -39,11 +39,21 @@ void main() {
     vec4 albedo = texture2D(gtexture, chillTexCoord) * chillColor;
     albedo.rgb = mix(albedo.rgb, entityColor.rgb, entityColor.a);
     if (albedo.a <= max(alphaTestRef, 0.01)) discard;
+    vec3 sampledLight = texture2D(lightmap, chillLightmap).rgb;
+    // colortex3 carries a compact entity marker into the water composite.
+    // The block-light channel preserves genuinely illuminated mobs, while
+    // albedo luminance lets the later pass recover colours that would
+    // otherwise already be crushed by the entity's normal scene lighting.
+    vec4 entityWaterContext = vec4(
+        0.0,
+        clamp(chillLightmap.x, 0.0, 1.0),
+        1.0,
+        clamp(chillLuminance(albedo.rgb), 0.0, 1.0)
+    );
 #ifdef CHILL_NETHER_ENTITY
     // Nether entities must not pass through the Overworld sun/shadow/fog path.
     // Light them from the local lightmap and write surviving texture pixels as
     // opaque; the shared final pass applies the same biome fog as the terrain.
-    vec3 sampledLight = texture2D(lightmap, chillLightmap).rgb;
     vec3 biomeFog = chillNetherBiomeFog(
         fogColor,
         chillNetherWastes,
@@ -73,26 +83,23 @@ void main() {
     // radiance already written by the terrain behind them. Leaving these
     // buffers untouched made bright Nether surfaces shine through mob bodies.
     gl_FragData[1] = vec4(0.0, 0.0, 0.0, outputOpacity);
+    gl_FragData[2] = entityWaterContext;
     // Alpha 1 is an occlusion marker for the later emission blur. Without it,
     // neighbouring lava/fire samples can be blurred back across a solid mob.
-    gl_FragData[2] = vec4(0.0, 0.0, 0.0, outputOpacity);
+    gl_FragData[3] = vec4(0.0, 0.0, 0.0, outputOpacity);
     return;
 #endif
     vec3 sunDir = normalize(sunPosition);
     vec3 upDir = normalize(upPosition);
-    float shadow = chillShadowSample(
-        shadowtex1,
-        chillWorldPos,
-        chillNormal,
-        chillPlayerNormal,
-        normalize(shadowLightPosition),
-        shadowModelView,
-        shadowProjection
-    );
-    vec3 color = chillSceneLighting(albedo.rgb, chillNormal, chillLightmap, texture2D(lightmap, chillLightmap).rgb, sunDir, upDir, shadow, rainStrength);
+    // Entities still cast into the shadow pass, but sampling that same map on
+    // animated entity geometry produces unstable self-shadow bands. Keep their
+    // normal/lightmap shading while preventing only that self-shadow feedback.
+    float shadow = 1.0;
+    vec3 color = chillSceneLighting(albedo.rgb, chillNormal, chillLightmap, sampledLight, sunDir, upDir, shadow, rainStrength);
     float day = chillDayFactor(sunDir, upDir);
     vec3 fog = chillSkyColor(normalize(chillWorldPos), sunDir, upDir, rainStrength, thunderStrength, 1.0 - day);
     gl_FragData[0] = vec4(chillApplyFog(color, fog, length(chillWorldPos), max(rainStrength, thunderStrength), day), albedo.a);
     gl_FragData[1] = vec4(0.0, 0.0, 0.0, albedo.a);
-    gl_FragData[2] = vec4(0.0, 0.0, 0.0, albedo.a);
+    gl_FragData[2] = entityWaterContext;
+    gl_FragData[3] = vec4(0.0, 0.0, 0.0, albedo.a);
 }

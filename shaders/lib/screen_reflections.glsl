@@ -113,9 +113,19 @@ vec4 chillTraceScreenReflection(
                 }
                 if (heightConfidence <= 0.001) return vec4(0.0);
 
-                // Never reflect another water/ice marker. Opaque terrain at the
-                // same screen location remains available through depthtex1.
-                if (texture2D(colortex2, hitUv).b > 0.025) return vec4(0.0);
+                // Never reflect another translucent water/ice marker. Check
+                // the complete blur footprint rather than only its centre.
+                vec2 markerPixel = vec2(
+                    1.0 / max(viewWidth, 1.0),
+                    1.0 / max(viewHeight, 1.0)
+                ) * max(blurRadius * 0.72, 1.0);
+                float nearbyTranslucent = texture2D(colortex2, hitUv).b;
+                nearbyTranslucent = max(nearbyTranslucent, texture2D(colortex2, hitUv + vec2( markerPixel.x,  markerPixel.y)).b);
+                nearbyTranslucent = max(nearbyTranslucent, texture2D(colortex2, hitUv + vec2(-markerPixel.x,  markerPixel.y)).b);
+                nearbyTranslucent = max(nearbyTranslucent, texture2D(colortex2, hitUv + vec2( markerPixel.x, -markerPixel.y)).b);
+                nearbyTranslucent = max(nearbyTranslucent, texture2D(colortex2, hitUv + vec2(-markerPixel.x, -markerPixel.y)).b);
+
+                if (nearbyTranslucent > 0.002) return vec4(0.0);
                 if (hitDepth + 0.0001 <= surfaceDepth) return vec4(0.0);
                 float facing = chillSaturate(dot(surfaceNormal, -eyeRay));
                 float grazing = 1.0 - facing;

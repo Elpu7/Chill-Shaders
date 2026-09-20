@@ -185,6 +185,21 @@ void main() {
         vec3 lavaTintedScene = color * vec3(1.16, 0.40, 0.075) + vec3(0.055, 0.006, 0.0);
         vec3 lavaFogColor = vec3(0.44, 0.052, 0.003);
         color = mix(lavaTintedScene, lavaFogColor, chillSaturate(lavaFog));
+    } else if (isEyeInWater == 3) {
+        // Powdered snow is a dense participating medium just like lava, but
+        // with cold diffuse scattering. Limit visibility to a few blocks so
+        // entering a full block cannot expose the landscape through it.
+        float snowDepth = texture2D(depthtex0, chillTexCoord).r;
+        float snowDistance = snowDepth < 0.9999
+            ? length(chillFinalViewPosition(chillTexCoord, snowDepth))
+            : far;
+        float skyLight = chillSaturate(float(eyeBrightnessSmooth.y) / 240.0);
+        float blockLight = chillSaturate(float(eyeBrightnessSmooth.x) / 240.0);
+        float localLight = max(skyLight, blockLight * 0.72);
+        float snowFog = 1.0 - exp(-max(snowDistance - 0.20, 0.0) * 0.52 * FOG_DENSITY);
+        vec3 snowTintedScene = color * mix(vec3(0.72, 0.80, 0.91), vec3(0.86, 0.91, 0.98), localLight);
+        vec3 snowFogColor = mix(vec3(0.49, 0.56, 0.66), vec3(0.76, 0.82, 0.90), localLight);
+        color = mix(snowTintedScene, snowFogColor, chillSaturate(snowFog * 0.985));
     } else {
         // Detect the Nether through smooth biome uniforms in every dimension.
         // Applying this in final guarantees that entities, particles, liquids

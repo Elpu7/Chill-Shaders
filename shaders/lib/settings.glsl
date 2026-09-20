@@ -4,7 +4,7 @@
 // User options. Keep these declarations central so Iris and OptiFine see one
 // consistent value in every program that includes this file.
 #define SHADOW_RESOLUTION 2048 // [1024 2048 4096] Shadow-map resolution
-#define SHADOW_DISTANCE 112 // [48 112 160] Shadow rendering distance in blocks
+#define SHADOW_DISTANCE 256 // [96 128 160 192 256 320 384] Camera-facing shadow rendering distance in blocks
 #define SHADOW_FILTER 2 // [0 1 2 3] Shadow filtering quality
 // Iris stabilizes its shadow camera by snapping it to a world-space grid. A
 // one-shadow-texel interval makes the map update many times per walked block,

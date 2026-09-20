@@ -1,7 +1,7 @@
 #version 120
 #include "/lib/settings.glsl"
 const int shadowMapResolution = SHADOW_RESOLUTION; // [512 1024 2048 4096]
-const float shadowDistance = SHADOW_DISTANCE; // [48 72 112 160]
+const float shadowDistance = SHADOW_DISTANCE; // [96 128 160 192 256 320 384]
 const float shadowDistanceRenderMul = 1.0;
 // Match the vertex pass exactly: caster generation and receiver sampling use
 // the same unmodified Iris shadow matrix.

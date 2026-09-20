@@ -12,7 +12,6 @@ varying vec3 chillNormal;
 varying vec3 chillPlayerNormal;
 varying vec3 chillWorldPos;
 varying float chillFoliage;
-varying float chillIceType;
 varying float chillEmissionType;
 varying float chillEndMaterialType;
 
@@ -22,7 +21,6 @@ void main() {
     // Vanilla IDs: grasses/leaves are normally 31 and 18.
     chillFoliage = float(int(mc_Entity.x) == 18 || int(mc_Entity.x) == 31 || int(mc_Entity.x) == 106 || int(mc_Entity.x) == 111 || int(mc_Entity.x) == 161 || int(mc_Entity.x) == 175);
     int materialId = int(mc_Entity.x);
-    chillIceType = (materialId == 79 || materialId == 212) ? 1.0 : ((materialId == 174 || materialId == 266) ? 2.0 : 0.0);
     chillEmissionType = (materialId == 10010 || materialId == 10011)
         ? 1.0
         : (materialId == 10012 ? 2.0 : ((materialId == 10021 || materialId == 10022) ? 3.0 : 0.0));
